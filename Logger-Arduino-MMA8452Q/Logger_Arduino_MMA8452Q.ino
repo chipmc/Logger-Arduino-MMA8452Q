@@ -81,7 +81,7 @@
 #define MMA8452_ADDRESS 0x1C
 #endif
 // There are some new pin assignments when using the new v9 and v10 boards
-#define V910BOARD 1
+#define V910BOARD 0
 #if V910BOARD                    // These are the pin assignments for the v9 and v10 boards
 #define ALARMPIN 3         // This one will be used for the RTC Alarm in v9 and v10
 #define INT2PIN 2         // This is the interrupt pin that registers taps
@@ -107,30 +107,31 @@
 #define DAILYPERIOD day(t) // Normally day(t) but can use minute(t) or hour(t) for debugging
 
 //These defines let me change the memory map and configuration without hunting through the whole program
-#define VERSIONNUMBER 7      // Increment this number each time the memory map is changed
-#define WORDSIZE 8            // For the Word size
-#define PAGESIZE 4096         // Memory size in bytes / word size - 256kb FRAM
+#define VERSIONNUMBER 7             // Increment this number each time the memory map is changed
+#define WORDSIZE 8                  // For the Word size
+#define PAGESIZE 4096               // Memory size in bytes / word size - 256kb FRAM
 // First Word - 8 bytes for setting global values
-#define DAILYOFFSET 2        // First word of daily counts
-#define HOURLYOFFSET 30        // First word of hourly counts (remember we start counts at 1)
-#define DAILYCOUNTNUMBER 28    // used in modulo calculations - sets the # of days stored
-#define HOURLYCOUNTNUMBER 4064 // used in modulo calculations - sets the # of hours stored - 256k (4096-14-2)
-#define VERSIONADDR 0x0       // Memory Locations By Name not Number
-#define SENSITIVITYADDR 0x1   // For the 1st Word locations
-#define DEBOUNCEADDR 0x2        // Two bytes for debounce
-#define DAILYPOINTERADDR 0x4    // One byte for daily pointer
-#define HOURLYPOINTERADDR 0x5   // Two bytes for hourly pointer
-#define CONTROLREGISTER 0x7     // This is the control register acted on by both Simblee and Arduino
+#define DAILYOFFSET 2               // First word of daily counts
+#define HOURLYOFFSET 30             // First word of hourly counts (remember we start counts at 1)
+#define DAILYCOUNTNUMBER 28         // used in modulo calculations - sets the # of days stored
+#define HOURLYCOUNTNUMBER 4064      // used in modulo calculations - sets the # of hours stored - 256k (4096-14-2)
+#define VERSIONADDR 0x0             // Memory Locations By Name not Number
+#define SENSITIVITYADDR 0x1         // For the 1st Word locations
+#define DEBOUNCEADDR 0x2            // One byte for debounce (stored in cSec mult by 10 for mSec)
+#define MONTHLYREBOOTCOUNT 0x3      // This is where we store the reboots - indication of system health
+#define DAILYPOINTERADDR 0x4        // One byte for daily pointer
+#define HOURLYPOINTERADDR 0x5       // Two bytes for hourly pointer
+#define CONTROLREGISTER 0x7         // This is the control register acted on by both Simblee and Arduino
 //Second Word - 8 bytes for storing current counts
-#define CURRENTHOURLYCOUNTADDR 0x8
-#define CURRENTDAILYCOUNTADDR 0xA
-#define CURRENTCOUNTSTIME 0xC
+#define CURRENTHOURLYCOUNTADDR 0x8  // Current Hourly Count
+#define CURRENTDAILYCOUNTADDR 0xA   // Current Daily Count
+#define CURRENTCOUNTSTIME 0xC       // Time of last count
 //These are the hourly and daily offsets that make up the respective words
-#define DAILYDATEOFFSET 1         //Offsets for the value in the daily words
-#define DAILYCOUNTOFFSET 2        // Count is a 16-bt value
-#define DAILYBATTOFFSET 4
+#define DAILYDATEOFFSET 1           //Offsets for the value in the daily words
+#define DAILYCOUNTOFFSET 2          // Count is a 16-bt value
+#define DAILYBATTOFFSET 4           // Where the battery charge is stored
 #define HOURLYCOUNTOFFSET 4         // Offsets for the values in the hourly words
-#define HOURLYBATTOFFSET 6
+#define HOURLYBATTOFFSET 6          // Where the hourly battery charge is stored
 // LED Pin Value Variables
 #define REDLED 4          // led connected to digital pin 4
 #define YELLOWLED 6       // The yellow LED
@@ -245,10 +246,9 @@ int bootCountAddr = 0;              // Address for Boot Count Number
 // Add setup code
 void setup()
 {
-    Wire.begin();
     Serial.begin(9600);                     // Initialize communications with the terminal
     Serial.println("");                     // Header information
-    Serial.print(F("Trail-Counter-Arduino - release "));
+    Serial.print(F("Logger-Arduino-MMA8452Q - release "));
     Serial.println(releaseNumber);
     pinModeFast(REDLED, OUTPUT);            // declare the Red LED Pin as an output
     pinModeFast(YELLOWLED, OUTPUT);         // declare the Yellow LED Pin as as OUTPUT
@@ -263,6 +263,27 @@ void setup()
     
     
     enable32Khz(1); // turns on the 32k squarewave - to moderate access to the i2c bus
+    
+    wdt_reset();            // Reset in case watchdog was already running
+    wdt_enable(WDTO_1S);    // Gives this set of actions 1 second to complete
+    int rtn = I2C_ClearBus(); // clear the I2C bus first before calling Wire.begin()
+    if (rtn != 0)
+    {
+        Serial.println(F("I2C bus error. Could not clear"));
+        if (rtn == 1) {
+            Serial.println(F("SCL clock line held low"));
+        } else if (rtn == 2) {
+            Serial.println(F("SCL clock line held low by slave clock stretch"));
+        } else if (rtn == 3) {
+            Serial.println(F("SDA data line held low"));
+        }
+    }
+    else    // Else the bus is clear - can restart Wire
+    {
+        Wire.begin();
+    }
+    wdt_disable();  // Diable the watchdog timer
+    Serial.println(F("Wire setup finished"));
     
     
     TakeTheBus(); // Need th i2c bus for initializations
@@ -321,7 +342,8 @@ void setup()
     accelSensitivity = FRAMread8(10-SENSITIVITYADDR);
     Serial.println(accelSensitivity);
     Serial.print(F("Debounce set to: "));
-    debounce = FRAMread16(DEBOUNCEADDR);
+    debounce = FRAMread16(DEBOUNCEADDR)*10;     // We mulitply by ten since debounce is stored in 100ths of a second
+    if (debounce > delaySleep) delaySleep = debounce;       // delaySleep must be bigger than debounce afterall
     Serial.println(debounce);
     
     FRAMwrite8(CONTROLREGISTER, toggleStartStop);       // Reset the control register and start the test
@@ -345,16 +367,18 @@ void setup()
     Serial.print(F("Monthly reboot count is "));
     bootCountAddr = EEPROM.read(0);             // Here is where we will track reboots by month - offset stored in 0 byte
     bootcount = EEPROM.read(bootCountAddr);     // Use the offset to get to this month's boot count
-    bootcount++;                            // Increment the boot count
+    bootcount++;                                // Increment the boot count
     Serial.print(bootcount);
-    EEPROM.write(bootCountAddr, bootcount); // Write it back into the correct spot
+    EEPROM.write(bootCountAddr, bootcount);     // Write it back into the correct spot
     Serial.print(F(" with a monthly offset of: "));
     TakeTheBus();
-    t = RTC.get();
+        t = RTC.get();
     GiveUpTheBus();
-    bootCountAddr = month(t);       // Boot counts are offset by month to reduce burn - in risk
-    EEPROM.update(0, bootCountAddr);    // Will update the month if it has changed but only at reboot
-    Serial.println(EEPROM.read(0));      // Print so we can see if code is working
+    bootCountAddr = month(t);                   // Boot counts are offset by month to reduce burn - in risk
+    EEPROM.update(0, bootCountAddr);            // Will update the month if it has changed but only at reboot
+    Serial.println(EEPROM.read(0));             // Print so we can see if code is working
+    FRAMwrite8(MONTHLYREBOOTCOUNT, bootcount); // Store in FRAM for access by Simblee in user interface
+
     
     Serial.print(F("Free memory: "));
     Serial.println(freeRam());
@@ -398,13 +422,15 @@ void loop()
                 Serial.print(F("Sensitivity set to: "));
                 Serial.println(10-FRAMread8(SENSITIVITYADDR));
                 Serial.print(F("Debounce set to: "));
-                Serial.println(FRAMread16(DEBOUNCEADDR));
+                Serial.println(FRAMread16(DEBOUNCEADDR)*10);        // We mulitply by 10 as debounce is stored in 100ths
                 Serial.print(F("Hourly count: "));
                 Serial.println(FRAMread16(CURRENTHOURLYCOUNTADDR));
                 Serial.print(F("Daily count: "));
                 Serial.println(FRAMread16(CURRENTDAILYCOUNTADDR));
                 Serial.print(F("Free memory: "));
                 Serial.println(freeRam());
+                Serial.print(F("Reboots this month: "));
+                Serial.println(bootcount);
                 break;
             case '2':     // Set the clock
                 SetTimeDate();
@@ -434,9 +460,10 @@ void loop()
                     continue;
                 }
                 debounce = Serial.parseInt();
+                if (debounce > delaySleep) delaySleep = debounce;       // delaySleep must be bigger than debounce afterall
                 Serial.print(F("Debounce set to: "));
                 Serial.println(debounce);
-                FRAMwrite16(DEBOUNCEADDR, debounce);
+                FRAMwrite16(DEBOUNCEADDR, debounce/10);     // Remember we store debounce in cSec
                 break;
             case '5':  // Reset the current counters
                 Serial.println(F("Counter Reset!"));
@@ -530,7 +557,8 @@ void loop()
         }
         else if (controlRegisterValue & signalDebounceChange)   // If we changed the debounce value on the Simblee side
         {
-            debounce = FRAMread16(DEBOUNCEADDR);
+            debounce = FRAMread16(DEBOUNCEADDR)*10;     // We multiply by 10 since debounce is stored in cSec
+            if (debounce > delaySleep) delaySleep = debounce;       // delaySleep must be bigger than debounce afterall
             Serial.print(F("Updated debounce value to:"));
             Serial.println(debounce);
             controlRegisterValue &= clearDebounceChange;
@@ -621,9 +649,10 @@ void CheckForBump() // This is where we check to see if an interrupt is set when
             Serial.print(hourlyPersonCount);
             Serial.print(F(" Daily: "));
             Serial.print(dailyPersonCount);
+            Serial.print(F(" Reboots: "));
+            Serial.print(bootcount);
             Serial.print(F("  Time: "));
             PrintTimeDate(t);
-            Serial.println("");
             ledState = !ledState;              // toggle the status of the LEDPIN:
             digitalWrite(REDLED, ledState);    // update the LED pin itself
         }
