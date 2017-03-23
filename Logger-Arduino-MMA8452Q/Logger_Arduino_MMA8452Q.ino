@@ -81,7 +81,7 @@
 #define MMA8452_ADDRESS 0x1C
 #endif
 // There are some new pin assignments when using the new v9 and v10 boards
-#define V910BOARD 0
+#define V910BOARD 1
 #if V910BOARD                    // These are the pin assignments for the v9 and v10 boards
 #define ALARMPIN 3         // This one will be used for the RTC Alarm in v9 and v10
 #define INT2PIN 2         // This is the interrupt pin that registers taps
@@ -264,8 +264,6 @@ void setup()
     
     enable32Khz(1); // turns on the 32k squarewave - to moderate access to the i2c bus
     
-    wdt_reset();            // Reset in case watchdog was already running
-    wdt_enable(WDTO_1S);    // Gives this set of actions 1 second to complete
     int rtn = I2C_ClearBus(); // clear the I2C bus first before calling Wire.begin()
     if (rtn != 0)
     {
@@ -282,8 +280,6 @@ void setup()
     {
         Wire.begin();
     }
-    wdt_disable();  // Diable the watchdog timer
-    Serial.println(F("Wire setup finished"));
     
     
     TakeTheBus(); // Need th i2c bus for initializations
@@ -370,14 +366,14 @@ void setup()
     bootcount++;                                // Increment the boot count
     Serial.print(bootcount);
     EEPROM.write(bootCountAddr, bootcount);     // Write it back into the correct spot
+    FRAMwrite8(MONTHLYREBOOTCOUNT, bootcount); // Store in FRAM for access by Simblee in user interface
     Serial.print(F(" with a monthly offset of: "));
     TakeTheBus();
-        t = RTC.get();
+    t = RTC.get();
     GiveUpTheBus();
     bootCountAddr = month(t);                   // Boot counts are offset by month to reduce burn - in risk
     EEPROM.update(0, bootCountAddr);            // Will update the month if it has changed but only at reboot
     Serial.println(EEPROM.read(0));             // Print so we can see if code is working
-    FRAMwrite8(MONTHLYREBOOTCOUNT, bootcount); // Store in FRAM for access by Simblee in user interface
 
     
     Serial.print(F("Free memory: "));
