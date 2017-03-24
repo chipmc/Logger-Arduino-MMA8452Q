@@ -338,7 +338,7 @@ void setup()
     accelSensitivity = FRAMread8(10-SENSITIVITYADDR);
     Serial.println(accelSensitivity);
     Serial.print(F("Debounce set to: "));
-    debounce = FRAMread16(DEBOUNCEADDR)*10;     // We mulitply by ten since debounce is stored in 100ths of a second
+    debounce = FRAMread8(DEBOUNCEADDR)*10;     // We mulitply by ten since debounce is stored in 100ths of a second
     if (debounce > delaySleep) delaySleep = debounce;       // delaySleep must be bigger than debounce afterall
     Serial.println(debounce);
     
@@ -418,7 +418,7 @@ void loop()
                 Serial.print(F("Sensitivity set to: "));
                 Serial.println(10-FRAMread8(SENSITIVITYADDR));
                 Serial.print(F("Debounce set to: "));
-                Serial.println(FRAMread16(DEBOUNCEADDR)*10);        // We mulitply by 10 as debounce is stored in 100ths
+                Serial.println(FRAMread8(DEBOUNCEADDR)*10);        // We mulitply by 10 as debounce is stored in 100ths
                 Serial.print(F("Hourly count: "));
                 Serial.println(FRAMread16(CURRENTHOURLYCOUNTADDR));
                 Serial.print(F("Daily count: "));
@@ -459,7 +459,7 @@ void loop()
                 if (debounce > delaySleep) delaySleep = debounce;       // delaySleep must be bigger than debounce afterall
                 Serial.print(F("Debounce set to: "));
                 Serial.println(debounce);
-                FRAMwrite16(DEBOUNCEADDR, debounce/10);     // Remember we store debounce in cSec
+                FRAMwrite8(DEBOUNCEADDR, debounce/10);     // Remember we store debounce in cSec
                 break;
             case '5':  // Reset the current counters
                 Serial.println(F("Counter Reset!"));
@@ -553,7 +553,7 @@ void loop()
         }
         else if (controlRegisterValue & signalDebounceChange)   // If we changed the debounce value on the Simblee side
         {
-            debounce = FRAMread16(DEBOUNCEADDR)*10;     // We multiply by 10 since debounce is stored in cSec
+            debounce = FRAMread8(DEBOUNCEADDR)*10;     // We multiply by 10 since debounce is stored in cSec
             if (debounce > delaySleep) delaySleep = debounce;       // delaySleep must be bigger than debounce afterall
             Serial.print(F("Updated debounce value to:"));
             Serial.println(debounce);
@@ -616,9 +616,9 @@ void CheckForBump() // This is where we check to see if an interrupt is set when
     if (digitalReadFast(INT2PIN)==0)    // If int2 goes LOW, either p/l has changed or there's been a single/double tap
     {
         TakeTheBus();
-        byte source = readRegister(0x0C);  // Read the interrupt source reg.
-        readRegister(0x22);  // Reads the PULSE_SRC register to reset it
-        GiveUpTheBus();
+            byte source = readRegister(0x0C);  // Read the interrupt source reg.
+            readRegister(0x22);  // Reads the PULSE_SRC register to reset it
+            GiveUpTheBus();
         if ((source & 0x08)==0x08 && millis() >= lastBump + debounce)  // We are only interested in the TAP register and ignore debounced taps
         {
             Serial.println(F("It is a tap - counting"));
