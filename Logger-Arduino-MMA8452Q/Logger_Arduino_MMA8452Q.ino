@@ -137,7 +137,7 @@
 #define YELLOWLED 6       // The yellow LED
 #define LEDPWR 7          // This pin turns on and off the LEDs
 // Finally, here are the variables I want to change often and pull them all together here
-#define SOFTWARERELEASENUMBER "2.0.1"
+#define SOFTWARERELEASENUMBER "2.0.2"
 #define PARKCLOSES 19
 #define PARKOPENS 7
 
@@ -153,7 +153,6 @@
 #include <TimeLib.h>            //http://www.arduino.cc/playground/Code/Time
 #include "DS3232RTC.h"          //http://github.com/JChristensen/DS3232RTC
 #include "Adafruit_FRAM_I2C.h"  // Library for FRAM functions
-#include "digitalWriteFast.h"   // Try to cut down on overhead for timing sensitive IO - https://github.com/NicksonYap/digitalWriteFast
 #include "FRAMcommon.h"         // Where I put all the common FRAM read and write extensions
 
 
@@ -246,40 +245,29 @@ int bootCountAddr = 0;              // Address for Boot Count Number
 // Add setup code
 void setup()
 {
-    Serial.begin(9600);                     // Initialize communications with the terminal
-    Serial.println("");                     // Header information
+    //disable watchdog if enabled
+    wdt_reset();                        // Reset the Timer
+    MCUSR=0;                            // Sequence to do what wdt_disble() is supposed to do
+    WDTCSR|=_BV(WDCE) | _BV(WDE);
+    WDTCSR=0;
+    Serial.begin(9600);                 // Initialize communications with the terminal
+    Wire.begin();                       // Start the standard Wire library
+    Serial.println("");                 // Header information
     Serial.print(F("Logger-Arduino-MMA8452Q - release "));
     Serial.println(releaseNumber);
-    pinModeFast(REDLED, OUTPUT);            // declare the Red LED Pin as an output
-    pinModeFast(YELLOWLED, OUTPUT);         // declare the Yellow LED Pin as as OUTPUT
-    pinModeFast(LEDPWR, OUTPUT);            // declare the Power LED pin as as OUTPUT
-    digitalWriteFast(LEDPWR, LOW);          // Turn on the power to the LEDs at startup for as long as is set in LEDsonTime
-    pinModeFast(I2CPWR, OUTPUT);            // This is for V10 boards which can turn off power to the external i2c header
-    digitalWriteFast(I2CPWR, HIGH);         // Turns on the i2c port
-    pinModeFast(RESETPIN,INPUT);            // Just to make sure - if set to output, you cant program the SIMBLEE
-    pinModeFast(INT2PIN, INPUT);            // Set up the interrupt pins, they're set as active low with an external pull-up
-    pinModeFast(THE32KPIN,INPUT);           // These are the pins tha are used to negotiate for the i2c bus
-    pinModeFast(TALKPIN,INPUT);             // These are the pins tha are used to negotiate for the i2c bus
+    pinMode(REDLED, OUTPUT);            // declare the Red LED Pin as an output
+    pinMode(YELLOWLED, OUTPUT);         // declare the Yellow LED Pin as as OUTPUT
+    pinMode(LEDPWR, OUTPUT);            // declare the Power LED pin as as OUTPUT
+    digitalWrite(LEDPWR, LOW);          // Turn on the power to the LEDs at startup for as long as is set in LEDsonTime
+    pinMode(I2CPWR, OUTPUT);            // This is for V10 boards which can turn off power to the external i2c header
+    digitalWrite(I2CPWR, HIGH);         // Turns on the i2c port
+    pinMode(RESETPIN,INPUT);            // Just to make sure - if set to output, you cant program the SIMBLEE
+    pinMode(INT2PIN, INPUT);            // Set up the interrupt pins, they're set as active low with an external pull-up
+    pinMode(THE32KPIN,INPUT);           // These are the pins tha are used to negotiate for the i2c bus
+    pinMode(TALKPIN,INPUT);             // These are the pins tha are used to negotiate for the i2c bus
     
     
     enable32Khz(1); // turns on the 32k squarewave - to moderate access to the i2c bus
-    
-    int rtn = I2C_ClearBus(); // clear the I2C bus first before calling Wire.begin()
-    if (rtn != 0)
-    {
-        Serial.println(F("I2C bus error. Could not clear"));
-        if (rtn == 1) {
-            Serial.println(F("SCL clock line held low"));
-        } else if (rtn == 2) {
-            Serial.println(F("SCL clock line held low by slave clock stretch"));
-        } else if (rtn == 3) {
-            Serial.println(F("SDA data line held low"));
-        }
-    }
-    else    // Else the bus is clear - can restart Wire
-    {
-        Wire.begin();
-    }
     
     
     TakeTheBus(); // Need th i2c bus for initializations
@@ -613,7 +601,7 @@ void loop()
 
 void CheckForBump() // This is where we check to see if an interrupt is set when not asleep or act on a tap that woke the Arduino
 {
-    if (digitalReadFast(INT2PIN)==0)    // If int2 goes LOW, either p/l has changed or there's been a single/double tap
+    if (digitalRead(INT2PIN)==0)    // If int2 goes LOW, either p/l has changed or there's been a single/double tap
     {
         TakeTheBus();
             byte source = readRegister(0x0C);  // Read the interrupt source reg.
@@ -966,9 +954,9 @@ void BlinkForever() // When something goes badly wrong...
 {
     Serial.println(F("Error - Reboot"));
     while(1) {
-        digitalWriteFast(REDLED,HIGH);
+        digitalWrite(REDLED,HIGH);
         delay(200);
-        digitalWriteFast(REDLED,LOW);
+        digitalWrite(REDLED,LOW);
         delay(200);
     }
 }
